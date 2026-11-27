@@ -1,0 +1,42 @@
+---
+- name: Destroy resources created by this project
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../group_vars/all.yml
+  environment:
+    AWS_DEFAULT_REGION: "{{ aws_region }}"
+
+  tasks:
+    - name: Find instances belonging to this project
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Project": "{{ project_name }}"
+          instance-state-name:
+            - pending
+            - running
+            - stopping
+            - stopped
+      register: project_instances
+
+    - name: Terminate project EC2 instances
+      amazon.aws.ec2_instance:
+        region: "{{ aws_region }}"
+        instance_ids: "{{ project_instances.instances | map(attribute='instance_id') | list }}"
+        state: absent
+        wait: true
+      when: project_instances.instances | length > 0
+
+    - name: Delete the project security group
+      amazon.aws.ec2_security_group:
+        name: "{{ security_group_name }}"
+        region: "{{ aws_region }}"
+        state: absent
+      register: sg_delete
+      failed_when: false
+
+    - name: Explain security group deletion result
+      ansible.builtin.debug:
+        msg: "If deletion failed because the group is still in use, check for dependent resources and rerun this playbook."
